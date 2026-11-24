@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>拾词 · 背单词</title>
+  <meta name="description" content="拾词：纯本地存储的背单词应用，管理词表、多模式背诵与掌握度追踪。">
+  <meta name="theme-color" content="#F4F2EC">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="拾词">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="app-bar">
+      <button class="brand" id="brand-home" type="button" aria-label="回到词书">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-text">
+          <span class="brand-name">拾词</span>
+          <span class="brand-sub">本地词库</span>
+        </span>
+      </button>
+      <div class="bar-right" id="bar-right"></div>
+    </header>
+
+    <main class="view" id="view" aria-live="polite"></main>
+
+    <nav class="tabbar" id="tabbar" aria-label="主导航">
+      <button class="tab is-active" data-tab="words" type="button">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z"/>
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M8 7.5h8M8 11h5"/>
+          </svg>
+        </span>
+        <span class="tab-label">词书</span>
+      </button>
+      <button class="tab" data-tab="study" type="button">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.5" y="6" width="13" height="14" rx="2.5"/>
+            <path d="M7.5 3.5h10A2.5 2.5 0 0 1 20 6v10"/>
+            <path d="M7.5 11h5M7.5 15h3"/>
+          </svg>
+        </span>
+        <span class="tab-label">背诵</span>
+      </button>
+      <button class="tab" data-tab="favorites" type="button">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 3.8h12a1 1 0 0 1 1 1V21l-7-4.2L5 21V4.8a1 1 0 0 1 1-1z"/>
+          </svg>
+        </span>
+        <span class="tab-label">收藏</span>
+      </button>
+      <button class="tab" data-tab="settings" type="button">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/>
+            <circle cx="15" cy="7" r="2"/>
+            <circle cx="9" cy="17" r="2"/>
+          </svg>
+        </span>
+        <span class="tab-label">设置</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="session-root" hidden></div>
+  <div id="modal-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div class="boot-error" id="boot-error" hidden>
+    <div class="boot-error-card">
+      <h1>拾词无法启动</h1>
+      <p id="boot-error-msg">浏览器阻止了本地数据存储。</p>
+      <p class="hint">请使用 Chrome / Edge / Safari 打开，并避免在无痕模式下使用。</p>
+    </div>
+  </div>
+
+  <script src="core.js"></script>
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
