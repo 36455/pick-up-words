@@ -40,6 +40,7 @@
 
   var pendingConfirm = null;
   var toastTimer = null;
+  var WORD_SORT_IDS = ['recent', 'old', 'az', 'za', 'cn', 'weak', 'mistakes', 'star'];
   var voices = [];
   var syncTimer = null;
   var syncChannel = null;
@@ -165,6 +166,7 @@
       var settingsRow = (result[2] || []).filter(function (row) { return row && row.id === 'settings'; })[0];
       state.books = (result[4] || []).map(normalizeBookRecord);
       state.settings = normalizeSettings(settingsRow);
+      state.wordSort = state.settings.wordSort;
       state.stats = result[3] || C.freshDailyStats();
       state.statsHistory = (result[5] || []).filter(function (r) { return r && r.date; });
       ensureBookLinks();
@@ -179,6 +181,14 @@
       }
       render();
     }).catch(function () { /* 静默失败，等下一次同步 */ });
+  }
+
+  function registerOffline() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    navigator.serviceWorker.register('./sw.js').catch(function () {
+      /* 不支持或被浏览器拒绝时静默忽略，不影响在线使用 */
+    });
   }
 
   function requestPersistence() {
@@ -200,6 +210,7 @@
       defaultBookId: C.DEFAULT_BOOK_ID,
       rate: 1,
       accent: 'en-US',
+      wordSort: 'recent',
       show: { cn: false, en: true, exEn: true, exCn: false },
       lastBackupAt: 0
     };
@@ -213,6 +224,7 @@
     if ([0.5, 0.75, 1, 1.2].indexOf(Number(s.rate)) < 0) s.rate = 1;
     s.rate = Number(s.rate);
     if (s.accent !== 'en-GB' && s.accent !== 'en-US') s.accent = 'en-US';
+    if (WORD_SORT_IDS.indexOf(s.wordSort) < 0) s.wordSort = 'recent';
     s.defaultBookId = String(s.defaultBookId || C.DEFAULT_BOOK_ID);
     s.dailyNew = Math.max(0, Number(s.dailyNew) || 0);
     s.dailyReview = Math.max(0, Number(s.dailyReview) || 0);
@@ -499,6 +511,7 @@
       var settingsRow = (result[2] || []).filter(function (row) { return row && row.id === 'settings'; })[0];
       state.books = (result[4] || []).map(normalizeBookRecord);
       state.settings = normalizeSettings(settingsRow);
+      state.wordSort = state.settings.wordSort;
       state.stats = result[3] || C.freshDailyStats();
       state.statsHistory = (result[5] || []).filter(function (r) { return r && r.date; });
       state.modes = state.settings.defaultModes.slice();
@@ -510,6 +523,7 @@
       bindEvents();
       render();
       requestPersistence();
+      registerOffline();
       restoreActiveSession();
       document.addEventListener('visibilitychange', function () {
         if (!document.hidden) scheduleExternalReload();
@@ -605,7 +619,10 @@
     }).join('');
 
     var sortOptions = [
-      ['recent', '最近添加'],
+      ['recent', '收录时间（新→旧）'],
+      ['old', '收录时间（旧→新）'],
+      ['az', '字母 A→Z'],
+      ['za', '字母 Z→A'],
       ['cn', '按中文'],
       ['weak', '薄弱优先'],
       ['mistakes', '错词优先'],
@@ -1209,7 +1226,38 @@
     return inner + '<p class="session-footnote">' + C.DIM_LABEL[mode.dim] + '维度 · 本题答错会在本轮末尾重出</p>';
   }
 
-  function extraAnswerHtml(task, word) {
+  function diffTokensHtml(tokens, wrongClass) {
+    return (tokens || []).map(function (t) {
+      return '<span class="diff-token' + (t.ok ? '' : ' ' + wrongClass) + '">' + esc(t.text) + '</span>';
+    }).join(' ');
+  }
+
+  function answerFeedbackHtml(task, result) {
+    if (!result || result.correct) return '';
+    if (task.mode === 'dictation' && result.diff) {
+      return '<div class="feedback-block"><div class="fb-title">逐词对照</div>' +
+        '<div class="fb-row"><span class="fb-k">你写</span><span class="fb-text">' +
+        diffTokensHtml(result.diff.input, 'is-extra') + '</span></div>' +
+        '<div class="fb-row"><span class="fb-k">原句</span><span class="fb-text">' +
+        diffTokensHtml(result.diff.target, 'is-missing') + '</span></div>' +
+        '<p class="fb-note">漏写 ' + result.diff.missing + ' 词 · 多写 ' + result.diff.extra + ' 词</p></div>';
+    }
+    if (task.mode === 'multiCloze' && result.blanks && result.blanks.length) {
+      var right = result.blanks.filter(function (b) { return b.correct; }).length;
+      var rows = result.blanks.map(function (b, idx) {
+        return '<div class="blank-result' + (b.correct ? '' : ' is-wrong') + '">' +
+          '<span class="br-k">第 ' + (idx + 1) + ' 空</span>' +
+          '<span class="br-v">' + esc(b.value || '（空）') + '</span>' +
+          (b.correct ? '<span class="br-tag">正确</span>' : '<span class="br-tag">应为 ' + esc(b.answer) + '</span>') +
+          '</div>';
+      }).join('');
+      return '<div class="feedback-block"><div class="fb-title">逐空判定 ' + right + ' / ' +
+        result.blanks.length + ' 正确</div>' + rows + '</div>';
+    }
+    return '';
+  }
+
+  function extraAnswerHtml(task, word, result) {
     if (task.mode === 'dictation') {
       var d = C.dictationFor(word);
       if (!d) return '';
@@ -1284,7 +1332,8 @@
       (word.phonetic ? '<span class="phonetic">' + esc(word.phonetic) + '</span>' : '') +
       (word.pos ? '<span class="pos-tag">' + esc(word.pos) + '</span>' : '') +
       '<button class="icon-btn" data-action="speak" data-text="' + esc(word.word) + '" type="button" aria-label="朗读单词">' + ICONS.speaker + '</button></div>' +
-      extraAnswerHtml(task, word) +
+      answerFeedbackHtml(task, result) +
+      extraAnswerHtml(task, word, result) +
       (rows ? '<div class="reveal-defs">' + rows + '</div>' : '') +
       wrongAnswer +
       '<button class="btn btn-primary btn-block next-btn" data-action="next-task" type="button">' +
@@ -1346,17 +1395,27 @@
   function finishAnswer(value, selectedId, word, task) {
     var s = state.session;
     var correct = false;
+    var diff = null;
+    var blanks = null;
     if (task.mode === 'spell' || task.mode === 'cnSpell' || task.mode === 'cloze') {
       correct = C.normalizeSpelling(value) === C.normalizeSpelling(word.word);
     } else if (task.mode === 'dictation') {
       var dict = C.dictationFor(word);
       correct = !!dict && C.isSentenceMatch(value, dict.en);
+      if (dict) diff = C.sentenceDiff(value, dict.en);
     } else if (task.mode === 'multiCloze') {
       var mc = C.multiClozeFor(word);
-      correct = !!mc && Array.isArray(value) && value.length === mc.answers.length &&
-        mc.answers.every(function (ans, idx) {
-          return C.normalizeSpelling(value[idx]) === C.normalizeSpelling(ans);
+      if (mc) {
+        blanks = mc.answers.map(function (ans, idx) {
+          var input = Array.isArray(value) ? value[idx] : '';
+          return {
+            value: input,
+            answer: ans,
+            correct: C.normalizeSpelling(input) === C.normalizeSpelling(ans)
+          };
         });
+        correct = blanks.length > 0 && blanks.every(function (b) { return b.correct; });
+      }
     } else if (task.mode === 'writeMeaning') {
       correct = C.meaningMatch(value, word);
     } else if (task.mode === 'quick') {
@@ -1385,7 +1444,7 @@
       s.total += 1;
     }
 
-    s.lastResult = { correct: correct, selectedId: selectedId, value: value };
+    s.lastResult = { correct: correct, selectedId: selectedId, value: value, diff: diff, blanks: blanks };
     s.revealed = true;
     renderSession();
     persistSession();
@@ -1593,12 +1652,14 @@
   function backupNoteHtml() {
     var last = state.settings.lastBackupAt || 0;
     if (!last) {
-      return '<div class="backup-note is-warn">还没有导出过备份，建议先导出一份。</div>';
+      return '<div class="backup-note is-warn">还没有导出过备份，建议先导出一份。' +
+        '<button class="btn btn-ghost btn-sm" data-action="export-backup" type="button">现在备份</button></div>';
     }
     var days = Math.floor((Date.now() - last) / 86400000);
     var text = '上次导出：' + formatDateTime(last);
     if (days >= 7) {
-      return '<div class="backup-note is-warn">' + text + ' · 已超过 7 天，建议尽快再导出一次。</div>';
+      return '<div class="backup-note is-warn">' + text + ' · 已超过 7 天，建议尽快再导出一次。' +
+        '<button class="btn btn-ghost btn-sm" data-action="export-backup" type="button">现在备份</button></div>';
     }
     return '<div class="backup-note">' + text + '</div>';
   }
@@ -2099,16 +2160,18 @@
       '<button data-action="import-tab" data-import-tab="file" class="is-active" type="button">文件</button>' +
       '<button data-action="import-tab" data-import-tab="paste" type="button">粘贴文本</button>' +
       '</div>' +
+      '<div class="import-template"><button class="btn btn-ghost btn-sm" data-action="import-template" type="button">下载导入模板</button>' +
+      '<span class="hint">含音标、词根、搭配、同义 / 反义、例句列</span></div>' +
       '<div id="import-file-pane">' +
       '<label class="file-drop" for="import-file">' +
       '<strong>选择 .md / .txt / .docx / .pdf 文件</strong>' +
       '<span>docx 与 pdf 在浏览器内解析，pdf 仅保证文本型</span></label>' +
       '<input class="import-file-input" id="import-file" type="file" accept=".md,.markdown,.txt,.docx,.pdf">' +
-      '<p class="hint" style="margin-top:10px">每行一条，列序：单词 · 词性（选填）· 中文释义 · 英文释义 · 例句。支持制表符、Markdown 表格、「单词 - 中文」等格式。</p>' +
+      '<p class="hint" style="margin-top:10px">每行一条；支持制表符、Markdown 表格和表头。表头可写 word / pos / cn / en / phonetic / roots / phrases / synonyms / antonyms / exampleEn / exampleCn，自动按列识别。</p>' +
       '</div>' +
       '<div id="import-paste-pane" hidden>' +
       '<div class="import-paste"><textarea class="textarea" id="import-text" placeholder="每行一条，例如：&#10;abandon\tv.\t放弃；抛弃\tto leave somebody behind\tHe abandoned his car.\t他把车丢在了雪地里。"></textarea></div>' +
-      '<p class="hint" style="margin-top:8px">无法上传文件时，可直接粘贴文本。列之间用制表符或多个空格分隔。</p>' +
+      '<p class="hint" style="margin-top:8px">无法上传文件时，可直接粘贴文本。列之间用制表符或多个空格分隔；带表头时按列名识别扩展字段。</p>' +
       '</div>' +
       '<div class="import-book">' +
       '<label class="field"><span>导入到生词本</span><select class="select" id="import-book">' +
@@ -2124,6 +2187,24 @@
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="import-parse" type="button">解析预览</button>' +
       '<button class="btn btn-primary" data-action="import-confirm" id="import-confirm-btn" type="button" disabled>确认导入</button></div>'
     );
+  }
+
+  function downloadImportTemplate() {
+    var lines = [
+      '| word | pos | cn | en | phonetic | roots | phrases | synonyms | antonyms | exampleEn | exampleCn |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| abandon | v. | 放弃；抛弃 | to leave somebody behind | /əˈbændən/ | ab- + andon | abandon oneself to=沉溺于; abandon ship=弃船 | give up, desert | keep, retain | He abandoned his car in the snow. | 他把车丢在了雪地里。 |'
+    ];
+    var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '拾词导入模板.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast('模板已下载，按表头填写即可');
   }
 
   function setImportStatus(text, isError) {
@@ -2167,7 +2248,8 @@
     if (announce) {
       setImportStatus((state.importSource ? '已读取：' + state.importSource + '。' : '') +
         '将导入到「' + target.name + '」；新词 ' + plan.counts.new + ' 个，已存在并加入本 ' +
-        plan.counts.join + ' 个，已在本中跳过 ' + plan.counts.skip + ' 个。');
+        plan.counts.join + ' 个，已在本中跳过 ' + plan.counts.skip + ' 个' +
+        (plan.counts.dup ? '，文件内重复 ' + plan.counts.dup + ' 条' : '') + '。');
     }
     previewEl.innerHTML = previewHtml(plan);
     confirmBtn.disabled = total === 0;
@@ -2176,20 +2258,32 @@
       : '没有需要导入的词';
   }
 
+  function previewExtra(entry) {
+    var e = entry || {};
+    var bits = [];
+    if (e.phonetic) bits.push('音标');
+    if (e.roots) bits.push('词根');
+    if (e.phrases && e.phrases.length) bits.push('搭配');
+    if (e.synonyms && e.synonyms.length) bits.push('同义');
+    if (e.antonyms && e.antonyms.length) bits.push('反义');
+    return bits.join(' · ');
+  }
+
   function previewHtml(plan) {
-    var statusLabel = { new: '新词', join: '加入本', skip: '已在本' };
+    var statusLabel = { new: '新词', join: '加入本', skip: '已在本', dup: '重复' };
     var rows = plan.rows.slice(0, 30).map(function (r) {
       var e = r.entry || {};
       return '<tr><td><span class="preview-status is-' + r.status + '">' + statusLabel[r.status] + '</span></td>' +
         '<td>' + esc(e.word) + '</td><td>' + esc(e.pos) + '</td><td>' + esc(e.cn) + '</td><td>' + esc(e.en) +
-        '</td><td>' + esc(e.exampleEn || e.exampleCn) + '</td></tr>';
+        '</td><td>' + esc(e.exampleEn || e.exampleCn) + '</td><td>' + esc(previewExtra(e)) + '</td></tr>';
     }).join('');
     return '<div class="preview-summary"><span>共 <b>' + plan.rows.length + '</b> 条</span>' +
       '<span>新词 <b>' + plan.counts.new + '</b></span>' +
       '<span>加入本 <b>' + plan.counts.join + '</b></span>' +
-      '<span>已在本跳过 <b>' + plan.counts.skip + '</b></span></div>' +
+      '<span>已在本跳过 <b>' + plan.counts.skip + '</b></span>' +
+      (plan.counts.dup ? '<span>重复跳过 <b>' + plan.counts.dup + '</b></span>' : '') + '</div>' +
       '<div class="preview-wrap"><table class="preview-table"><thead><tr>' +
-      '<th>状态</th><th>单词</th><th>词性</th><th>中文</th><th>英文</th><th>例句</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<th>状态</th><th>单词</th><th>词性</th><th>中文</th><th>英文</th><th>例句</th><th>扩展</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       (plan.rows.length > 30 ? '<div class="preview-more">仅显示前 30 条，导入时会包含全部 ' + plan.rows.length + ' 条。</div>' : '') +
       '</div>';
   }
@@ -2215,6 +2309,13 @@
           pos: e.pos || '',
           cn: e.cn || '',
           en: e.en || '',
+          phonetic: e.phonetic || '',
+          roots: e.roots || '',
+          phrases: (e.phrases || []).map(function (p) {
+            return { id: uid(), en: p.en || '', cn: p.cn || '' };
+          }),
+          synonyms: e.synonyms || [],
+          antonyms: e.antonyms || [],
           bookIds: [target.id],
           examples: examples,
           createdAt: now,
@@ -2236,7 +2337,8 @@
       state.tab = 'words';
       state.scope = { mode: 'books', bookIds: [target.id] };
       render();
-      toast('已导入 ' + fresh.length + ' 个新词，' + joins.length + ' 个加入「' + target.name + '」');
+      toast('已导入 ' + fresh.length + ' 个新词，' + joins.length + ' 个加入「' + target.name + '」' +
+        (plan.counts.dup ? '，跳过 ' + plan.counts.dup + ' 条重复' : ''));
     }).catch(function (err) {
       setImportStatus('写入本地数据库失败：' + (err && err.message ? err.message : '未知错误'), true);
     });
@@ -2529,6 +2631,7 @@
               state.words = [];
               state.sentences = [];
               state.settings = normalizeSettings(null);
+              state.wordSort = state.settings.wordSort;
               state.stats = C.freshDailyStats();
               state.statsHistory = [];
               state.modes = state.settings.defaultModes.slice();
@@ -2577,7 +2680,7 @@
     })[0];
     if (existing) {
       if ((existing.bookIds || []).indexOf(bookId) >= 0) {
-        toast('「' + bookName(bookId) + '」里已经有这个词了', true);
+        toast('「' + bookName(bookId) + '」里已经有「' + existing.word + '」了', true);
         return;
       }
       existing.bookIds = C.applyBookChange(existing, 'copy', null, bookId);
@@ -2585,7 +2688,7 @@
         notifyChange();
         closeModal();
         render();
-        toast('已加入「' + bookName(bookId) + '」');
+        toast('词库中已有「' + existing.word + '」，已加入「' + bookName(bookId) + '」');
       }).catch(function (err) {
         toast('保存失败：' + (err && err.message ? err.message : '未知错误'), true);
       });
@@ -2961,6 +3064,9 @@
           if (pastePane) pastePane.hidden = state.importTab !== 'paste';
           break;
         }
+        case 'import-template':
+          downloadImportTemplate();
+          break;
         case 'import-parse': {
           var txt = $('#import-text');
           parseImport(txt ? txt.value : '', '粘贴文本');
@@ -3104,7 +3210,9 @@
     document.addEventListener('change', function (event) {
       var target = event.target;
       if (target.id === 'word-sort') {
-        state.wordSort = target.value;
+        state.wordSort = WORD_SORT_IDS.indexOf(target.value) >= 0 ? target.value : 'recent';
+        state.settings.wordSort = state.wordSort;
+        DB.saveSettings(state.settings).then(notifyChange);
         render();
       } else if (target.id === 'import-file') {
         handleImportFile(target.files && target.files[0]);

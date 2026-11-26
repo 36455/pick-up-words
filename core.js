@@ -507,6 +507,54 @@
     return lcsLength(a, b) / Math.max(a.length, b.length) >= t;
   }
 
+  // 整句对照：按单词做 LCS，标出漏写 / 多写的词，供听写反馈高亮
+  function sentenceDiff(input, target) {
+    var a = String(input == null ? '' : input).trim().split(/\s+/).filter(Boolean);
+    var b = String(target == null ? '' : target).trim().split(/\s+/).filter(Boolean);
+    function key(t) {
+      return String(t || '').toLowerCase().replace(/[^a-z0-9'’]/g, '');
+    }
+    var ka = a.map(key);
+    var kb = b.map(key);
+    var m = a.length;
+    var n = b.length;
+    var dp = [];
+    for (var i = 0; i <= m; i++) dp.push(new Array(n + 1).fill(0));
+    for (i = 1; i <= m; i++) {
+      for (var j = 1; j <= n; j++) {
+        dp[i][j] = ka[i - 1] && ka[i - 1] === kb[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+    var hitA = {};
+    var hitB = {};
+    for (i = 0; i < m; i++) if (!ka[i]) hitA[i] = true;
+    for (j = 0; j < n; j++) if (!kb[j]) hitB[j] = true;
+    i = m;
+    j = n;
+    while (i > 0 && j > 0) {
+      if (ka[i - 1] && ka[i - 1] === kb[j - 1]) {
+        hitA[i - 1] = true;
+        hitB[j - 1] = true;
+        i--;
+        j--;
+      } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+    var inputTokens = a.map(function (t, idx) { return { text: t, ok: !!hitA[idx] }; });
+    var targetTokens = b.map(function (t, idx) { return { text: t, ok: !!hitB[idx] }; });
+    return {
+      input: inputTokens,
+      target: targetTokens,
+      extra: inputTokens.filter(function (t) { return !t.ok; }).length,
+      missing: targetTokens.filter(function (t) { return !t.ok; }).length
+    };
+  }
+
   // 整句听写：取第一条词数不少于 3 的英文例句
   function dictationFor(word) {
     var examples = (word && Array.isArray(word.examples)) ? word.examples : [];
@@ -1047,6 +1095,123 @@
     return out.join('/');
   }
 
+  // 导入表头：支持英文 / 中文列名，自动识别扩展字段
+  var IMPORT_HEADER_ALIASES = [
+    ['word', ['word', 'words', '单词', '词汇', '词条', '英文单词', 'english', 'term', 'vocabulary']],
+    ['pos', ['pos', 'partofspeech', '词性']],
+    ['phonetic', ['phonetic', 'ipa', '音标', '音标ipa', '发音']],
+    ['cn', ['cn', 'chinese', '中文', '中文释义', '释义', '意思', '中文意思']],
+    ['en', ['en', '英文', 'englishdefinition', '英文释义', '英文意思', 'definition', 'meaning']],
+    ['roots', ['roots', 'root', '词根', '词根词缀', '词缀']],
+    ['phrases', ['phrases', 'phrase', '搭配', '常见搭配', '短语']],
+    ['synonyms', ['synonyms', 'synonym', '同义', '同义词']],
+    ['antonyms', ['antonyms', 'antonym', '反义', '反义词']],
+    ['exampleEn', ['exampleen', 'example', 'examplesentence', 'sentence', '例句', '英文例句', '例句英文']],
+    ['exampleCn', ['examplecn', 'translation', '例句中文', '中文例句', '例句翻译']]
+  ];
+  var IMPORT_HEADER_LOOKUP = {};
+  IMPORT_HEADER_ALIASES.forEach(function (pair) {
+    pair[1].forEach(function (alias) {
+      IMPORT_HEADER_LOOKUP[headerKey(alias)] = pair[0];
+    });
+  });
+
+  function headerKey(value) {
+    return String(value == null ? '' : value).toLowerCase()
+      .replace(/[\s_\-*`（）()]/g, '')
+      .trim();
+  }
+
+  function importHeaderMap(cells) {
+    var map = {};
+    var hits = 0;
+    (cells || []).forEach(function (cell, idx) {
+      var field = IMPORT_HEADER_LOOKUP[headerKey(cell)];
+      if (field && map[field] === undefined) {
+        map[field] = idx;
+        hits++;
+      }
+    });
+    if (map.word === undefined || hits < 2) return null;
+    return map;
+  }
+
+  function splitImportList(text) {
+    var out = [];
+    String(text == null ? '' : text).split(/[,，;；、|\/]+/).forEach(function (item) {
+      var s = String(item || '').trim();
+      if (s && out.indexOf(s) < 0) out.push(s);
+    });
+    return out;
+  }
+
+  // 搭配格式：give up=放弃; give in=屈服（也兼容竖线分隔）
+  function parseImportPhrases(text) {
+    var out = [];
+    String(text == null ? '' : text).split(/\s*[;；]\s*|\n/).forEach(function (item) {
+      var s = String(item || '').trim();
+      if (!s) return;
+      var parts;
+      if (s.indexOf('=') >= 0) parts = s.split(/\s*=\s*/);
+      else if (s.indexOf('|') >= 0) parts = s.split(/\s*\|\s*/);
+      else if (s.indexOf('｜') >= 0) parts = s.split(/\s*｜\s*/);
+      else parts = [s];
+      var en = String(parts[0] || '').trim();
+      var cn = String(parts.slice(1).join('=') || '').trim();
+      if (!en && !cn) return;
+      out.push({ en: en, cn: cn });
+    });
+    return out;
+  }
+
+  // 带表头的行：按列名取值，避免扩展列被当成释义
+  function buildMappedEntry(cells, map) {
+    function get(field) {
+      var idx = map[field];
+      return idx === undefined || idx < 0 ? '' : String(cells[idx] == null ? '' : cells[idx]).trim();
+    }
+    var pos = parsePos(get('pos'));
+    var firstCell = get('word');
+    var leadPos = firstCell.match(/^\s*[（(\[【]\s*([^）)\]】]{1,30})\s*[）)\]】]\s*/);
+    if (leadPos && parsePos(leadPos[1])) {
+      if (!pos) pos = parsePos(leadPos[1]);
+      firstCell = firstCell.slice(leadPos[0].length);
+    }
+    var wordCell = firstCell
+      .replace(/[（(].*$/, '')
+      .replace(/[\[【].*$/, '')
+      .trim();
+    var wordBits = wordCell.split(/\s+/);
+    if (wordBits.length > 1) {
+      var tailPos = parsePos(wordBits[wordBits.length - 1]);
+      if (tailPos) {
+        if (!pos) pos = tailPos;
+        wordBits.pop();
+        wordCell = wordBits.join(' ');
+      }
+    }
+    var word = wordCell
+      .replace(/^[\s\-–—|:：]+/, '')
+      .replace(/[\s,;，；:：]+$/, '')
+      .trim();
+    if (!/^[A-Za-z][A-Za-z'’ .\-]{0,59}$/.test(word)) return null;
+    if (!word.replace(/[^A-Za-z]/g, '')) return null;
+
+    return {
+      word: word,
+      pos: pos,
+      cn: get('cn'),
+      en: get('en'),
+      phonetic: get('phonetic'),
+      roots: get('roots'),
+      phrases: parseImportPhrases(get('phrases')),
+      synonyms: splitImportList(get('synonyms')),
+      antonyms: splitImportList(get('antonyms')),
+      exampleEn: get('exampleEn'),
+      exampleCn: get('exampleCn')
+    };
+  }
+
   function buildEntry(cells) {
     var list = (cells || []).map(function (s) { return String(s == null ? '' : s).trim(); })
       .filter(Boolean);
@@ -1130,11 +1295,12 @@
   }
 
   function parseImportText(text) {
-    var src = String(text == null ? '' : text).replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
+    var src = String(text == null ? '' : text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
     var lines = src.split('\n');
     var entries = [];
     var seen = {};
     var inFence = false;
+    var columns = null;
 
     lines.forEach(function (raw) {
       var trimmedLine = raw.trim();
@@ -1149,13 +1315,20 @@
       var cells = null;
       if (/^\|.*\|$/.test(line)) {
         cells = splitPipeRow(line);
-        if (isSeparatorRow(cells) || isHeaderRow(cells)) return;
+        if (isSeparatorRow(cells)) return;
       } else {
         cells = parseLineCells(line);
-        if (!cells || isHeaderRow(cells)) return;
+        if (!cells) return;
       }
 
-      var entry = buildEntry(cells);
+      var header = importHeaderMap(cells);
+      if (header) {
+        columns = header;
+        return;
+      }
+      if (!columns && isHeaderRow(cells)) return;
+
+      var entry = columns ? buildMappedEntry(cells, columns) : buildEntry(cells);
       if (!entry) return;
       var key = normalizeWord(entry.word);
       if (seen[key]) return;
@@ -1250,9 +1423,18 @@
       if (!byKey[key]) byKey[key] = w;
     });
     var rows = [];
-    var counts = { new: 0, join: 0, skip: 0 };
+    var counts = { new: 0, join: 0, skip: 0, dup: 0 };
+    var seen = {};
     (entries || []).forEach(function (e) {
-      var hit = e && e.word ? byKey[normalizeWord(e.word)] : null;
+      var key = e && e.word ? normalizeWord(e.word) : '';
+      // 同一个词在本次导入里出现多次时只处理第一条
+      if (key && seen[key]) {
+        counts.dup++;
+        rows.push({ entry: e, word: seen[key], status: 'dup' });
+        return;
+      }
+      var hit = key ? byKey[key] : null;
+      if (key) seen[key] = hit || { word: e.word };
       if (!hit) {
         counts.new++;
         rows.push({ entry: e, word: null, status: 'new' });
@@ -1379,6 +1561,19 @@
         var diff = mistakeCount(b) - mistakeCount(a);
         if (diff) return diff;
         return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+    } else if (sort === 'az' || sort === 'za') {
+      var dir = sort === 'az' ? 1 : -1;
+      list.sort(function (a, b) {
+        var cmp = String(a.word || '').localeCompare(String(b.word || ''), 'en', { sensitivity: 'base' });
+        if (cmp) return cmp * dir;
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+    } else if (sort === 'old') {
+      list.sort(function (a, b) {
+        var diff = (a.createdAt || 0) - (b.createdAt || 0);
+        if (diff) return diff;
+        return String(a.word || '').localeCompare(String(b.word || ''), 'en', { sensitivity: 'base' });
       });
     } else {
       list.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
@@ -1561,6 +1756,7 @@
     sensesText: sensesText,
     meaningMatch: meaningMatch,
     isSentenceMatch: isSentenceMatch,
+    sentenceDiff: sentenceDiff,
     dictationFor: dictationFor,
     multiClozeFor: multiClozeFor,
     reportData: reportData,

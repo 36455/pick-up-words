@@ -634,6 +634,117 @@ h1, h2, h3, p {
   color: var(--warn);
 }
 
+.backup-note .btn {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.import-template {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.feedback-block {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7f4ec;
+  border: 1px solid #e8e1d3;
+}
+
+.fb-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-deep);
+  margin-bottom: 6px;
+}
+
+.fb-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fb-k {
+  flex: none;
+  color: var(--muted);
+}
+
+.fb-text {
+  flex: 1;
+  word-break: break-word;
+}
+
+.diff-token {
+  display: inline-block;
+  margin-right: 3px;
+}
+
+.diff-token.is-missing {
+  color: #a2453a;
+  border-bottom: 1.5px solid #c97363;
+}
+
+.diff-token.is-extra {
+  color: #8b6b45;
+  text-decoration: line-through;
+}
+
+.fb-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.blank-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  border-top: 1px dashed #e4ddcd;
+}
+
+.blank-result:first-of-type {
+  border-top: 0;
+}
+
+.br-k {
+  flex: none;
+  color: var(--muted);
+}
+
+.br-v {
+  flex: 1;
+  font-weight: 600;
+}
+
+.blank-result.is-wrong .br-v {
+  color: #a2453a;
+}
+
+.br-tag {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e9e3d6;
+  color: var(--muted);
+}
+
+.blank-result.is-wrong .br-tag {
+  background: #f3e2dd;
+  color: #a2453a;
+}
+
+
+
 .dims {
   display: flex;
   gap: 4px;
@@ -1437,6 +1548,10 @@ h1, h2, h3, p {
   font-family: Georgia, serif;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.preview-table td:nth-child(2) {
   white-space: nowrap;
 }
 
@@ -2384,6 +2499,7 @@ body.in-batch .view { padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 1
 .preview-status.is-new { background: var(--accent-soft); color: var(--accent-deep); }
 .preview-status.is-join { background: var(--warn-soft); color: var(--warn); }
 .preview-status.is-skip { background: #eceae2; color: #7a7e72; }
+.preview-status.is-dup { background: #f1e7e3; color: #9b5f4b; }
 
 .btn-ghost.is-active {
   background: var(--accent-soft);
